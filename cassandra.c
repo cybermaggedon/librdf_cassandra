@@ -973,6 +973,17 @@ static librdf_stream*
 librdf_storage_cassandra_serialise(librdf_storage* storage)
 {
 
+    librdf_statement* stmt = 
+	    librdf_new_statement_from_nodes(storage->world,
+					    0, 0, 0);
+
+    librdf_stream* strm = librdf_storage_cassandra_find_statements(storage,
+								   stmt);
+
+    librdf_free_statement(stmt);
+
+    return strm;
+
 #ifdef FIXME
     librdf_storage_cassandra_instance* context =
 	(librdf_storage_cassandra_instance*) storage->instance;

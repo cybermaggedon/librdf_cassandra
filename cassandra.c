@@ -166,8 +166,6 @@ librdf_storage_cassandra_init(librdf_storage* storage, const char *name,
 	return 1;
     }
 
-    fprintf(stderr, "Connected to Cassandra.\n");
-
     return 0;
 
 }
@@ -378,7 +376,7 @@ static CassStatement* cassandra_query_spo(const char* s, const char* p,
 
 }
 
-static int execute(CassSession* session, char* query)
+static int execute(CassSession* session, char* query, int ignore_error)
 {
 
     CassStatement* stmt = cass_statement_new(query, 0);
@@ -386,7 +384,13 @@ static int execute(CassSession* session, char* query)
     CassFuture* future = cass_session_execute(session, stmt);
 
     CassError rc = cass_future_error_code(future);
+ 
     if (rc != CASS_OK) {
+	if (ignore_error) {
+	    cass_future_free(future);
+	    return 0;
+	}
+	
 	fprintf(stderr, "Cassandra error: %s\n", cass_error_desc(rc));
 	cass_future_free(future);
 	return -1;
@@ -410,32 +414,28 @@ librdf_storage_cassandra_open(librdf_storage* storage, librdf_model* model)
 	"CREATE KEYSPACE rdf WITH replication = {"
 	"  'class': 'SimpleStrategy', 'replication_factor': '1'"
 	"};";
-    int ret = execute(context->session, statement);
-    if (ret < 0) fprintf(stderr, "Error ignored.\n");
+    int ret = execute(context->session, statement, 1);
 
     statement =
 	"CREATE TABLE rdf.spo ("
 	"  s text, p text, o text,"
 	"  primary key(s, p, o)"
 	");";
-    ret = execute(context->session, statement);
-    if (ret < 0) fprintf(stderr, "Error ignored.\n");
+    ret = execute(context->session, statement, 1);
 
     statement =
 	"CREATE TABLE rdf.pos ("
 	"  s text, p text, o text,"
 	"  primary key(p, o, s)"
 	");";
-    ret = execute(context->session, statement);
-    if (ret < 0) fprintf(stderr, "Error ignored.\n");
+    ret = execute(context->session, statement, 1);
 
     statement =
 	"CREATE TABLE rdf.osp ("
 	"  s text, p text, o text,"
 	"  primary key(o, s, p)"
 	");";
-    ret = execute(context->session, statement);
-    if (ret < 0) fprintf(stderr, "Error ignored.\n");
+    ret = execute(context->session, statement, 1);
 
     return 0;
 
@@ -536,7 +536,7 @@ librdf_storage_cassandra_add_statements(librdf_storage* storage,
 
     CassBatch* batch = 0;
 
-    const int batch_size = 1000;
+    const int batch_size = 10;
     int rows = 0;
 
     for(; !librdf_stream_end(statement_stream);

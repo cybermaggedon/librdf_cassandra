@@ -5,7 +5,7 @@ LIBS=-lrasqal -lrdf
 
 SQLITE_FLAGS=-DSTORE=\"sqlite\" -DSTORE_NAME=\"STORE.db\"
 
-CASSANDRA_FLAGS=-DSTORE=\"cassandra\" -DSTORE_NAME=\"gaffer:42424\"
+CASSANDRA_FLAGS=-DSTORE=\"cassandra\" -DSTORE_NAME=\"127.0.0.1\"
 
 #LIB_OBJS= 
 #cassandra.o \
@@ -32,12 +32,13 @@ test-sqlite.o: test.C
 test-cassandra.o: test.C
 	${CXX} ${CXXFLAGS} -c $< -o $@ ${CASSANDRA_FLAGS}
 
-CASSANDRA_OBJECTS=cassandra.o libcassandra.a
+CASSANDRA_OBJECTS=cassandra.o cpp/libcassandra_static.a
 
 librdf_storage_cassandra.so: ${CASSANDRA_OBJECTS}
-	${CXX} ${CXXFLAGS} -shared -o $@ ${CASSANDRA_OBJECTS} -lthrift
+	${CXX} ${CXXFLAGS} -shared -o $@ ${CASSANDRA_OBJECTS} -luv
 
-cassandra.o: CFLAGS += -DHAVE_CONFIG_H -DLIBRDF_INTERNAL=1 
+cassandra.o: CFLAGS += -DHAVE_CONFIG_H -DLIBRDF_INTERNAL=1
+cassandra.o: CFLAGS += -Icpp/include
 
 install: all
 	sudo cp librdf_storage_cassandra.so /usr/lib64/redland

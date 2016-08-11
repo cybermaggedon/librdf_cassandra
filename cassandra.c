@@ -166,6 +166,8 @@ librdf_storage_cassandra_init(librdf_storage* storage, const char *name,
 	return 1;
     }
 
+    cass_future_free(future);
+
     return 0;
 
 }
@@ -383,6 +385,8 @@ static int execute(CassSession* session, char* query, int ignore_error)
 
     CassFuture* future = cass_session_execute(session, stmt);
 
+    cass_statement_free(stmt);
+
     CassError rc = cass_future_error_code(future);
  
     if (rc != CASS_OK) {
@@ -453,68 +457,62 @@ librdf_storage_cassandra_open(librdf_storage* storage, librdf_model* model)
 static int
 librdf_storage_cassandra_close(librdf_storage* storage)
 {
-    // FIXME:
-#ifdef BROKEN
+
     librdf_storage_cassandra_instance* context;
     context = (librdf_storage_cassandra_instance*)storage->instance;
 
-    if (context->comms) {
-	cassandra_disconnect(context->comms);
-	context->comms = 0;
+    if (context->session) {
+	cass_session_free(context->session);
+	context->session = 0;
     }
 
-    if (context->transaction)
-	cassandra_elements_free(context->transaction);
+    if (context->cluster) {
+	cass_cluster_free(context->cluster);
+	context->session = 0;
+    }
 
-    return 0;
-#endif
 }
 
 static int
 librdf_storage_cassandra_size(librdf_storage* storage)
 {
-#ifdef BROKEN
+    
+    librdf_storage_cassandra_instance* context;
+    context = (librdf_storage_cassandra_instance*)storage->instance;
 
-    librdf_storage_cassandra_instance* context =
-	(librdf_storage_cassandra_instance*) storage->instance;
+    char* query = "SELECT count(s) FROM rdf.spo";
+    
+    CassStatement* stmt = cass_statement_new(query, 0);
 
-    int are_spo;
-    int filter;
-    char* path;
+    CassFuture* future = cass_session_execute(context->session, stmt);
 
-    cassandra_query* qry = cassandra_query_(0, 0, 0, &are_spo, &filter, &path);
+    cass_statement_free(stmt);
 
-    cassandra_results* res = cassandra_find(context->comms, path, qry);
-    if (res == 0) {
-	cassandra_query_free(qry);
-	fprintf(stderr, "Query execute failed.\n");
-	return -1;
+    CassError rc = cass_future_error_code(future);
+
+    if (rc != CASS_OK) {
+	fprintf(stderr, "Cassandra: %s\n", cass_error_desc(rc));
+	const char* msg;
+	size_t msg_len;
+	cass_future_error_message(future, &msg, &msg_len);
+	fprintf(stderr, "Cassandra: %*s\n", msg_len, msg);
+	cass_future_free(future);
+	return 0;
     }
 
-    cassandra_results_iterator* iter = cassandra_iterator_create(res);
+    const CassResult* result = cass_future_get_result(future);
 
-    cassandra_query_free(qry);
+    cass_future_free(future);
 
-    int count = 0;
-    
-    while (!cassandra_iterator_done(iter)) {
-	const char* a, * b, * c;
-	int val;
-    
-	cassandra_iterator_get(iter, &a, &b, &c, &val);
+    const CassRow* row = cass_result_first_row(result);
 
-	if ((val > 0) && (b[0] != '@') && (c[0] != '@'))
-	    count++;
-	cassandra_iterator_next(iter);
-    }
+    int64_t count;
+    cass_value_get_int64(cass_row_get_column(row, 0), &count);
 
-    cassandra_iterator_free(iter);
-
-    cassandra_results_free(res);
+    cass_result_free(result);
 
     return count;
-#endif
-
+	
 }
 
 static int
@@ -584,6 +582,10 @@ librdf_storage_cassandra_add_statements(librdf_storage* storage,
 	cass_statement_bind_string(stmt, 2, o);
 	cass_batch_add_statement(batch, stmt);
 	cass_statement_free(stmt);
+
+	free(s);
+	free(p);
+	free(o);
 
 	if (++rows > batch_size) {
 	    
@@ -940,20 +942,17 @@ static void
 cassandra_results_stream_finished(void* context)
 {
 
-#ifdef BROKEN
     cassandra_results_stream* scontext;
+    scontext = (cassandra_results_stream*)context;
 
-    scontext  = (cassandra_results_stream*)context;
+    if (scontext->iter)
+	cass_iterator_free(scontext->iter);
 
-    if (scontext->iterator) {
-	cassandra_iterator_free(scontext->iterator);
-	scontext->iterator = 0;
-    }
+    if (scontext->result)
+	cass_result_free(scontext->result);
 
-    if (scontext->results) {
-	cassandra_results_free(scontext->results);
-	scontext->results = 0;
-    }
+    if (scontext->stmt)
+	cass_statement_free(scontext->stmt);
 	
     if(scontext->storage)
 	librdf_storage_remove_reference(scontext->storage);
@@ -966,7 +965,6 @@ cassandra_results_stream_finished(void* context)
 
     LIBRDF_FREE(librdf_storage_cassandra_find_statements_stream_context, scontext);
 
-#endif
 }
 
 static librdf_stream*
@@ -984,60 +982,6 @@ librdf_storage_cassandra_serialise(librdf_storage* storage)
 
     return strm;
 
-#ifdef FIXME
-    librdf_storage_cassandra_instance* context =
-	(librdf_storage_cassandra_instance*) storage->instance;
-    
-    context = (librdf_storage_cassandra_instance*)storage->instance;
-
-    cassandra_results_stream* scontext;
-    
-    scontext =
-	LIBRDF_CALLOC(cassandra_results_stream*, 1, sizeof(*scontext));
-    if(!scontext)
-	return NULL;
-
-    scontext->storage = storage;
-    librdf_storage_add_reference(scontext->storage);
-
-    index_type tp;
-
-    cassandra_query* query = cassandra_query_(context->comms, 0, 0, 0, &tp);
-
-    cassandra_iterator* it = cassandra_query_execute(query);
-
-    cassandra_query_free(query);
-
-    if (it == 0) {
-	fprintf(stderr, "Failed to execute query.\n");
-        return 0;
-    }
-
-    scontext->it = it;
-    scontext->tp = tp;
-
-    if (cassandra_iterator_has_next(it)) {
-	scontext->kv = cassandra_iterator_get_next(it);
-	scontext->at_end = 0;
-    } else
-	scontext->at_end = 1;
-
-    librdf_stream* stream;
-
-    stream =
-	librdf_new_stream(storage->world,
-			  (void*)scontext,
-			  &cassandra_results_stream_end_of_stream,
-			  &cassandra_results_stream_next_statement,
-			  &cassandra_results_stream_get_statement,
-			  &cassandra_results_stream_finished);
-    if(!stream) {
-	cassandra_results_stream_finished((void*)scontext);
-	return NULL;
-    }
-  
-    return stream;
-#endif
 }
 
 
@@ -1081,6 +1025,15 @@ librdf_storage_cassandra_find_statements(librdf_storage* storage,
     scontext->cassandra_context = context;
 
     statement_helper(storage, statement, 0, &s, &p, &o, &c);
+
+    fprintf(stderr, "Query: ");
+    if (s)
+      fprintf(stderr, "s=%s ", s);
+    if (p)
+      fprintf(stderr, "p=%s ", p);
+    if (o)
+      fprintf(stderr, "o=%s ", o);
+    fprintf(stderr, "\n");
     
     typedef CassStatement* (*query_function)(const char* s, const char* p,
 					     const char* o);
@@ -1110,6 +1063,10 @@ librdf_storage_cassandra_find_statements(librdf_storage* storage,
     CassStatement* stmt = (*fn)(s, p, o);
     cass_statement_set_paging_size(stmt, 1000);
 
+    if (s) free(s);
+    if (p) free(p);
+    if (o) free(o);
+
     CassFuture* future = cass_session_execute(context->session, stmt);
 
     CassError rc = cass_future_error_code(future);
@@ -1120,40 +1077,15 @@ librdf_storage_cassandra_find_statements(librdf_storage* storage,
 	size_t msg_len;
 	cass_future_error_message(future, &msg, &msg_len);
 	fprintf(stderr, "Cassandra: %*s\n", msg_len, msg);
-	cass_statement_free(stmt);
 	cass_future_free(future);
 	return 0;
     }
 
     const CassResult* result = cass_future_get_result(future);
 
+    cass_future_free(future);
+
     CassIterator* iter = cass_iterator_from_result(result);
-
-    /*
-    while (cass_iterator_next(iter)) {
-	const CassRow* row = cass_iterator_get_row(iter);
-
-	const char *s;
-	size_t s_len;
-
-	const char *p;
-	size_t p_len;
-
-	const char *o;
-	size_t o_len;
-
-	cass_value_get_string(cass_row_get_column(row, 0), &s, &s_len);
-	cass_value_get_string(cass_row_get_column(row, 1), &p, &p_len);
-	cass_value_get_string(cass_row_get_column(row, 2), &o, &o_len);
-
-	printf("%*s %*s %*s\n", s_len, s, p_len, p, o_len, o);
-
-	printf("ROW\n");
-    }
-
-    printf("done\n");
-    exit(0);
-    */
     
     scontext->stmt = stmt;
     scontext->result = result;
@@ -1221,6 +1153,10 @@ librdf_storage_cassandra_context_add_statement(librdf_storage* storage,
     cass_statement_bind_string(stmt, 6, s);
     cass_statement_bind_string(stmt, 7, p);
     cass_statement_bind_string(stmt, 8, o);
+
+    if (s) free(s);
+    if (p) free(p);
+    if (o) free(o);
 
     CassFuture* future = cass_session_execute(context->session, stmt);
     cass_statement_free(stmt);

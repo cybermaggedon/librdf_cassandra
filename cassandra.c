@@ -785,8 +785,9 @@ cassandra_results_stream_end_of_stream(void* context)
 	    cass_result_free(scontext->result);
 	    scontext->result = 0;
 
-	    CassFuture* future = cass_session_execute(scontext->cassandra_context->session,
-						      scontext->stmt);
+	    CassFuture* future =
+		cass_session_execute(scontext->cassandra_context->session,
+				     scontext->stmt);
 
 	    CassError rc = cass_future_error_code(future);
 	    
@@ -807,6 +808,7 @@ cassandra_results_stream_end_of_stream(void* context)
 	    scontext->iter = cass_iterator_from_result(scontext->result);
 
 	    scontext->at_end = !cass_iterator_next(scontext->iter);
+	    scontext->more_pages = cass_result_has_more_pages(scontext->result);
 
 	}
 	
@@ -857,6 +859,8 @@ cassandra_results_stream_next_statement(void* context)
 
 	    scontext->iter = cass_iterator_from_result(scontext->result);
 
+	    scontext->more_pages = cass_result_has_more_pages(scontext->result);
+	    
 	    scontext->at_end = !cass_iterator_next(scontext->iter);
 
 	}

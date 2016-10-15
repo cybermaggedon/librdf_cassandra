@@ -780,8 +780,14 @@ cassandra_results_stream_end_of_stream(void* context)
 
 	if (scontext->more_pages) {
 
-	    cass_statement_set_paging_state(scontext->stmt,
-					    scontext->result);
+	    CassError rc;
+	    rc = cass_statement_set_paging_state(scontext->stmt,
+						 scontext->result);
+	    if (rc != CASS_OK) {
+		fprintf(stderr, "Cassandra: %s\n", cass_error_desc(rc));
+		return -1;
+	    }
+	    
 	    cass_result_free(scontext->result);
 	    scontext->result = 0;
 
@@ -789,7 +795,7 @@ cassandra_results_stream_end_of_stream(void* context)
 		cass_session_execute(scontext->cassandra_context->session,
 				     scontext->stmt);
 
-	    CassError rc = cass_future_error_code(future);
+	    rc = cass_future_error_code(future);
 	    
 	    if (rc != CASS_OK) {
 		fprintf(stderr, "Cassandra: %s\n", cass_error_desc(rc));
@@ -807,8 +813,9 @@ cassandra_results_stream_end_of_stream(void* context)
 
 	    scontext->iter = cass_iterator_from_result(scontext->result);
 
-	    scontext->at_end = !cass_iterator_next(scontext->iter);
 	    scontext->more_pages = cass_result_has_more_pages(scontext->result);
+
+	    scontext->at_end = !cass_iterator_next(scontext->iter);
 
 	}
 	
@@ -833,15 +840,22 @@ cassandra_results_stream_next_statement(void* context)
 
 	if (scontext->more_pages) {
 
-	    cass_statement_set_paging_state(scontext->stmt,
+	    fprintf(stderr, "Set paging state2\n");
+	    CassError rc;
+	    rc = cass_statement_set_paging_state(scontext->stmt,
 					    scontext->result);
+	    if (rc != CASS_OK) {
+		fprintf(stderr, "Cassandra: %s\n", cass_error_desc(rc));
+		return -1;
+	    }
 	    cass_result_free(scontext->result);
 	    scontext->result = 0;
 
-	    CassFuture* future = cass_session_execute(scontext->cassandra_context->session,
-						      scontext->stmt);
+	    CassFuture* future =
+		cass_session_execute(scontext->cassandra_context->session,
+				     scontext->stmt);
 
-	    CassError rc = cass_future_error_code(future);
+	    rc = cass_future_error_code(future);
 	    
 	    if (rc != CASS_OK) {
 		fprintf(stderr, "Cassandra: %s\n", cass_error_desc(rc));
@@ -860,7 +874,7 @@ cassandra_results_stream_next_statement(void* context)
 	    scontext->iter = cass_iterator_from_result(scontext->result);
 
 	    scontext->more_pages = cass_result_has_more_pages(scontext->result);
-	    
+
 	    scontext->at_end = !cass_iterator_next(scontext->iter);
 
 	}

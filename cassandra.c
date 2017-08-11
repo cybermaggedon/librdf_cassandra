@@ -1044,6 +1044,7 @@ librdf_storage_cassandra_find_statements(librdf_storage* storage,
 
     statement_helper(storage, statement, 0, &s, &p, &o, &c);
 
+#ifdef DEBUG
     fprintf(stderr, "Query: ");
     if (s)
       fprintf(stderr, "s=%s ", s);
@@ -1052,6 +1053,7 @@ librdf_storage_cassandra_find_statements(librdf_storage* storage,
     if (o)
       fprintf(stderr, "o=%s ", o);
     fprintf(stderr, "\n");
+#endif
     
     typedef CassStatement* (*query_function)(const char* s, const char* p,
 					     const char* o);
